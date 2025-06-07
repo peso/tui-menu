@@ -74,6 +74,19 @@ impl<T: Clone> MenuState<T> {
         self.root_item.highlight_next();
     }
 
+    /// Check if menu is active
+    pub fn is_active(&self) -> bool {
+        if self.root_item.is_active {
+            return true;
+        }
+        for item in state.root_item.children.iter() {
+            if item.is_highlight {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// trigger up movement
     /// NOTE: this action tries to do intuitive movement,
     /// which means logically it is not consistent, e.g:

@@ -1,3 +1,26 @@
+/*! Simple menu with Turbo Vision looks.
+
+This menu is modelled after the Turbo Vision api.
+The visuals are also aligned.
+
+## Main structs
+
+As dictated by Ratatui immediate mode, we model visual elements
+in a Widget and a WidgetState part. The first holds the configuration,
+and never changes. The second holds the parts that can be affected
+by user actions.
+
+In this case the style is found in the Widget [Menu]
+And menu items, as well as which is currently selected, are found in
+WidgetState [MenuState], which is built from [MenuItem].
+Any generated events (triggering a menu item) will be stored
+in MenuState.events.
+
+To define a menu, see examples in [MenuState].
+*/
+
+#![allow(dead_code)]
+
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -76,15 +99,7 @@ impl<T: Clone> MenuState<T> {
 
     /// Check if menu is active
     pub fn is_active(&self) -> bool {
-        if self.root_item.is_active {
-            return true;
-        }
-        for item in state.root_item.children.iter() {
-            if item.is_highlight {
-                return true;
-            }
-        }
-        return false;
+        return self.root_item.highlight().is_some();
     }
 
     /// trigger up movement
@@ -573,6 +588,10 @@ impl<T> Menu<T> {
     }
 
     /// render an item group in drop down
+    /* Each menu item is rendered like this
+    .|.NameString.|.
+      ^^^^^^^^^^^^ ------ this area will be highlighted
+    */
     fn render_dropdown(
         &self,
         x: u16,
@@ -581,6 +600,15 @@ impl<T> Menu<T> {
         buf: &mut ratatui::buffer::Buffer,
         dropdown_count_to_go: u16, // including current, it is not drawn yet
     ) {
+        // Compute width of all menu items
+        let child_max_width = group
+            .iter()
+            .map(|menu_item| Span::from(menu_item.name.clone()).width())
+            .max()
+            .unwrap_or(0) as u16;
+        let min_drop_down_width: u16 = (child_max_width + 6) as u16;
+        let min_drop_down_height: u16 = (group.len() + 2) as u16;
+
         // prevent calculation issue if canvas is narrow
         let drop_down_width = self.drop_down_width.min(buf.area.width);
 
@@ -594,24 +622,42 @@ impl<T> Menu<T> {
 
         let x = x.min(x_max);
 
-        let area = Rect::new(x, y, drop_down_width, group.len() as u16);
+        let area = Rect::new(x, y, min_drop_down_width, min_drop_down_height);
 
         // clamp to ensure we draw in areas
         let area = area.clamp(*buf.area());
 
         Clear.render(area, buf);
 
-        buf.set_style(area, self.drop_down_style);
+        buf.set_style(area, self.default_item_style);
 
+        // Render menu border
+        use ratatui::prelude::Margin;
+        use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
+        let border = Block::default()
+            .borders(Borders::ALL)
+            .style(self.default_item_style);
+        border.render(
+            area.inner(Margin {
+                vertical: 0,
+                horizontal: 1,
+            }),
+            buf,
+        );
+
+        // Render menu items
         let mut active_group: Option<_> = None;
         for (idx, item) in group.iter().enumerate() {
-            let item_y = y + idx as u16;
+            let item_x = x + 2;
+            let item_y = y + 1 + idx as u16;
             let is_active = item.is_highlight;
 
             let item_name = item.name();
 
             // make style apply to whole line by make name whole line
-            let mut item_name = format!("{: <width$}", item_name, width = drop_down_width as usize);
+            let mut item_name =
+                format!(" {: <width$} ", item_name, width = child_max_width as usize);
 
             if !item.children.is_empty() {
                 item_name.pop();
@@ -619,7 +665,7 @@ impl<T> Menu<T> {
             }
 
             buf.set_span(
-                x,
+                item_x,
                 item_y,
                 &Span::styled(
                     item_name,
@@ -629,11 +675,11 @@ impl<T> Menu<T> {
                         self.default_item_style
                     },
                 ),
-                drop_down_width,
+                child_max_width + 2,
             );
 
             if is_active && !item.children.is_empty() {
-                active_group = Some((x + drop_down_width, item_y, item));
+                active_group = Some((item_x + child_max_width, item_y, item));
             }
         }
 
@@ -662,7 +708,10 @@ impl<T: Clone> StatefulWidget for Menu<T> {
 
         let dropdown_count = state.dropdown_count();
 
-        for (idx, item) in state.root_item.children.iter().enumerate() {
+        // Skip top left char
+        spans.push(Span::raw(" ").style(self.default_item_style));
+
+        for item in state.root_item.children.iter() {
             let is_highlight = item.is_highlight;
             let item_style = if is_highlight {
                 self.highlight_item_style
@@ -672,21 +721,15 @@ impl<T: Clone> StatefulWidget for Menu<T> {
             let has_children = !item.children.is_empty();
 
             let group_x_pos = x_pos;
-            let span = Span::styled(item.name(), item_style);
+            let span = Span::styled(format!(" {} ", item.name()), item_style);
             x_pos += span.width() as u16;
             spans.push(span);
 
             if has_children && is_highlight {
                 self.render_dropdown(group_x_pos, y_pos + 1, &item.children, buf, dropdown_count);
             }
-
-            if idx < state.root_item.children.len() - 1 {
-                let span = Span::raw(" | ");
-                x_pos += span.width() as u16;
-                spans.push(span);
-            }
         }
-        buf.set_line(area.x, area.y, &Line::from(spans), x_pos);
+        buf.set_line(area.x, area.y, &Line::from(spans), area.width);
     }
 }
 

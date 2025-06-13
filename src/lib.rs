@@ -331,6 +331,7 @@ impl<T: Clone> MenuState<T> {
             .children
             .iter_mut()
             .for_each(|c| c.clear_highlight());
+        self.root_item.clear_highlight();
     }
 
     /// client should drain events each frame, otherwise user action

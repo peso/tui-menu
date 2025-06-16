@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Border around drop down menus
 - Menu line
+- Mouse support
 
 ## [0.3.0](https://github.com/shuoli84/tui-menu/compare/v0.2.4...v0.3.0) - 2024-12-09
 

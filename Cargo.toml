@@ -12,7 +12,7 @@ repository = "https://github.com/shuoli84/tui-menu"
 [dependencies]
 ratatui-core = "0.1.0"
 ratatui-widgets = "0.3.0"
+ratatui = { version = "0.30.0", features = ["crossterm"] }
 
 [dev-dependencies]
 color-eyre = "0.6.3"
-ratatui = { version = "0.30.0", features = ["crossterm"] }

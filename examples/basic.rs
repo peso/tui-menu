@@ -1,5 +1,7 @@
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode},
+    crossterm::event::{self,
+         Event, KeyCode
+    },
     prelude::{Buffer, Constraint, Layout, Rect, StatefulWidget, Stylize, Widget},
     widgets::{Block, Paragraph},
 };
@@ -79,8 +81,10 @@ impl App {
             terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
 
             if event::poll(std::time::Duration::from_millis(10))? {
-                if let Event::Key(key) = event::read()? {
-                    self.on_key_event(key);
+                match event::read()? {
+                    Event::Key(key) => self.on_key_event(key),
+                    Event::Mouse(mouse) => self.on_mouse_event(mouse),
+                    _ => (),
                 }
             }
 
@@ -116,6 +120,10 @@ impl App {
             KeyCode::Enter => self.menu.select(),
             _ => {}
         }
+    }
+
+    fn on_mouse_event(&mut self, mouse: event::MouseEvent) {
+        self.menu.on_mouse_event(&mouse);
     }
 }
 

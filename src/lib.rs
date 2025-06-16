@@ -22,12 +22,14 @@ To define a menu, see examples in [MenuState].
 #![allow(dead_code)]
 
 use ratatui::{
+    crossterm::event::{MouseButton, MouseEvent, MouseEventKind},
     layout::Rect,
+    prelude::Position,
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Clear, StatefulWidget, Widget},
 };
-use std::{borrow::Cow, marker::PhantomData};
+use std::{borrow::Cow, cell::Ref, cell::RefCell, cell::RefMut, marker::PhantomData, rc::Rc};
 
 /// Events this widget produce
 /// Now only emit Selected, may add few in future
@@ -37,10 +39,91 @@ pub enum MenuEvent<T> {
     Selected(T),
 }
 
+pub struct RefMenuItem<T>(Rc<RefCell<MenuItem<T>>>);
+
+impl<T> Clone for RefMenuItem<T> {
+    fn clone(&self) -> Self {
+        Self {
+            0: Rc::clone(&self.0),
+        }
+    }
+}
+
+impl<T> RefMenuItem<T> {
+    // Wrap MenuItem in a RefMenuItem
+    pub fn new(menu_item: MenuItem<T>) -> Self {
+        Self {
+            0: Rc::new(RefCell::new(menu_item)),
+        }
+    }
+
+    pub fn borrow(&self) -> Ref<MenuItem<T>> {
+        self.0.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> RefMut<MenuItem<T>> {
+        self.0.borrow_mut()
+    }
+
+    // Move highlight to previous child
+    pub fn highlight_prev(&self) {
+        self.borrow_mut().highlight_prev()
+    }
+
+    // Move highlight to next child
+    pub fn highlight_next(&self) {
+        self.borrow_mut().highlight_next()
+    }
+
+    // Return index of highlighted child
+    pub fn highlight_child_index(&self) -> Option<usize> {
+        self.borrow().highlight_child_index()
+    }
+
+    // Return ref to highlighted child
+    pub fn highlight_child(&self) -> Option<RefMenuItem<T>> {
+        let Some(rmi) = self.borrow().highlight_child() else {
+            return None;
+        };
+        Some(rmi.clone())
+    }
+
+    // Clear all highlights so menu is foldet up
+    pub fn clear_highlight(&self) {
+        self.borrow_mut().clear_highlight()
+    }
+
+    fn find_menu_item(&self, point: Position) -> Option<(RefMenuItem<T>, usize)> {
+        find_menu_item(self, point)
+    }
+}
+
+/// Find the deepest child that contains the point
+/// Return parent and index into parent
+/// Does not test this menu item.
+fn find_menu_item<T>(parent: &RefMenuItem<T>, point: Position) -> Option<(RefMenuItem<T>, usize)> {
+    // Check grandchildren first
+    for child in parent.borrow().children.iter() {
+        if child.borrow().is_highlight {
+            let result = child.find_menu_item(point);
+            if result.is_some() {
+                return result.clone();
+            }
+        }
+    }
+    // Check all children
+    for (inx, child_rect) in parent.borrow().child_rect.iter().enumerate() {
+        if child_rect.contains(point) {
+            return Some((parent.clone(), inx));
+        }
+    }
+    return None;
+}
+
 /// The state for menu, keep track of runtime info
 pub struct MenuState<T> {
     /// stores the menu tree
-    root_item: MenuItem<T>,
+    root_item: RefMenuItem<T>,
     /// stores events generated in one frame
     events: Vec<MenuEvent<T>>,
 }
@@ -61,10 +144,10 @@ impl<T: Clone> MenuState<T> {
     /// ]);
     /// ```
     pub fn new(items: Vec<MenuItem<T>>) -> Self {
-        let mut root_item = MenuItem::group("root", items);
+        let root_item = RefMenuItem::new(MenuItem::group("root", items));
         // the root item marked as always highlight
         // this makes highlight logic more consistent
-        root_item.is_highlight = true;
+        root_item.borrow_mut().is_highlight = true;
 
         Self {
             root_item,
@@ -89,17 +172,21 @@ impl<T: Clone> MenuState<T> {
     ///
     /// state.activate();
     ///
-    /// assert_eq!(state.highlight().unwrap().data.unwrap(), "label_foo");
+    /// assert_eq!(state.find_highlight().unwrap().data.unwrap(), "label_foo");
     ///
     /// ```
     ///
     pub fn activate(&mut self) {
+        if self.root_item.borrow().is_highlight {
+            return;
+        }
+        self.root_item.borrow_mut().is_highlight = true;
         self.root_item.highlight_next();
     }
 
     /// Check if menu is active
     pub fn is_active(&self) -> bool {
-        return self.root_item.highlight().is_some();
+        return self.find_highlight().is_some();
     }
 
     /// trigger up movement
@@ -256,7 +343,7 @@ impl<T: Clone> MenuState<T> {
     /// highlight the prev item in current group
     /// if already the first, then do nothing
     fn prev(&mut self) {
-        if let Some(item) = self.root_item.highlight_last_but_one() {
+        if let Some(item) = self.find_highlight_parent() {
             item.highlight_prev();
         } else {
             self.root_item.highlight_prev();
@@ -266,7 +353,7 @@ impl<T: Clone> MenuState<T> {
     /// highlight the next item in current group
     /// if already the last, then do nothing
     fn next(&mut self) {
-        if let Some(item) = self.root_item.highlight_last_but_one() {
+        if let Some(item) = self.find_highlight_parent() {
             item.highlight_next();
         } else {
             self.root_item.highlight_next();
@@ -290,7 +377,7 @@ impl<T: Clone> MenuState<T> {
     /// NOTE: If current group contains sub-group, in order to keep ui consistent,
     ///   even the sub-group not selected, its space is counted
     fn dropdown_count(&self) -> u16 {
-        let mut node = &self.root_item;
+        let mut node: RefMenuItem<T> = self.root_item.clone();
         let mut count = 0;
         loop {
             match node.highlight_child() {
@@ -298,16 +385,16 @@ impl<T: Clone> MenuState<T> {
                     return count;
                 }
                 Some(highlight_child) => {
-                    if highlight_child.is_group() {
+                    if highlight_child.borrow().is_group() {
                         // highlighted child is a group, then it's children is previewed
                         count += 1;
-                    } else if node.children.iter().any(|c| c.is_group()) {
+                    } else if node.borrow().children.iter().any(|c| c.borrow().is_group()) {
                         // if highlighted item is not a group, but if sibling contains group
                         // in order to keep ui consistency, also count it
                         count += 1;
                     }
 
-                    node = highlight_child;
+                    node = highlight_child.clone();
                 }
             }
         }
@@ -316,10 +403,10 @@ impl<T: Clone> MenuState<T> {
     /// select current highlight item, if it has children
     /// then push
     pub fn select(&mut self) {
-        if let Some(item) = self.root_item.highlight_mut() {
-            if !item.children.is_empty() {
+        if let Some(item) = self.find_highlight() {
+            if !item.borrow().children.is_empty() {
                 self.push();
-            } else if let Some(ref data) = item.data {
+            } else if let Some(ref data) = item.borrow().data {
                 self.events.push(MenuEvent::Selected(data.clone()));
             }
         }
@@ -329,23 +416,19 @@ impl<T: Clone> MenuState<T> {
     /// Return: Some if entered deeper level
     ///         None if nothing happen
     pub fn push(&mut self) -> Option<()> {
-        self.root_item.highlight_mut()?.highlight_first_child()
+        self.find_highlight()?.borrow_mut().highlight_first_child()
     }
 
     /// pop the current menu group. move one layer up
     pub fn pop(&mut self) {
-        if let Some(item) = self.root_item.highlight_mut() {
-            item.clear_highlight();
+        if let Some(item) = self.find_highlight() {
+            item.borrow_mut().clear_highlight();
         }
     }
 
     /// clear all highlighted items. This is useful
     /// when the menu bar lose focus
     pub fn reset(&mut self) {
-        self.root_item
-            .children
-            .iter_mut()
-            .for_each(|c| c.clear_highlight());
         self.root_item.clear_highlight();
     }
 
@@ -355,9 +438,72 @@ impl<T: Clone> MenuState<T> {
         std::mem::take(&mut self.events).into_iter()
     }
 
-    /// return current highlighted item's reference
-    pub fn highlight(&self) -> Option<&MenuItem<T>> {
-        self.root_item.highlight()
+    /// return deepest highlight item's reference
+    pub fn find_highlight(&self) -> Option<RefMenuItem<T>> {
+        let (_parent, child) = self.find_highlight_parent_child();
+        child
+    }
+
+    /// last but one layer in highlight.
+    /// This will be the parent of the deepest highlight item
+    pub fn find_highlight_parent(&mut self) -> Option<RefMenuItem<T>> {
+        let (parent, _child) = self.find_highlight_parent_child();
+        parent
+    }
+
+    /// Find deepest highlighted menu item and its parent
+    ///
+    /// Hidden root menu (None, None)
+    /// Visible root menu, no children (None, Some(child))
+    /// Drop down menu (Some(parent), Some(child))
+    /// Impossible (Some(parent), None)
+    fn find_highlight_parent_child(&self) -> (Option<RefMenuItem<T>>, Option<RefMenuItem<T>>) {
+        if !self.root_item.borrow().is_highlight {
+            return (None, None);
+        }
+
+        let mut parent = None;
+        let mut child = Some(self.root_item.clone());
+
+        loop {
+            let next_child = child.as_ref().and_then(|c| c.highlight_child());
+            if next_child.is_none() {
+                break;
+            }
+            parent = child;
+            child = next_child;
+        }
+        return (parent, child);
+    }
+
+    /// Try to handle a mouse event. If handled, return true
+    pub fn on_mouse_event(&mut self, event: &MouseEvent) -> bool {
+        let point = Position {
+            x: event.column,
+            y: event.row,
+        };
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let root_item = self.root_item.clone();
+                if let Some((parent, child_inx)) = root_item.find_menu_item(point) {
+                    {
+                        // Scope to make sure parent borrow is released
+                        let mut parent = parent.borrow_mut();
+                        parent.clear_highlight();
+                        parent.is_highlight = true;
+                        parent.children[child_inx].borrow_mut().is_highlight = true;
+                    }
+                    self.select();
+                }
+            }
+            /* drag is kinda' complicated .. so not yet
+            MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+                menu_item.find_highlight()
+            }
+            */
+            _ => return false,
+        }
+        return true;
     }
 }
 
@@ -369,7 +515,8 @@ const MENU_LINE: &str = "";
 pub struct MenuItem<T> {
     name: Cow<'static, str>,
     pub data: Option<T>,
-    children: Vec<MenuItem<T>>,
+    children: Vec<RefMenuItem<T>>,
+    child_rect: Vec<Rect>,
     is_highlight: bool,
 }
 
@@ -381,6 +528,7 @@ impl<T> MenuItem<T> {
             data: Some(data),
             is_highlight: false,
             children: vec![],
+            child_rect: vec![],
         }
     }
 
@@ -402,11 +550,13 @@ impl<T> MenuItem<T> {
         if children.get(0).filter(|c| c.name == MENU_LINE).is_some() {
             panic!("First menu item in a group must not be a line");
         }
+        let child_count = children.len();
         Self {
             name: name.into(),
             data: None,
             is_highlight: false,
-            children,
+            children: children.into_iter().map(|c| RefMenuItem::new(c)).collect(),
+            child_rect: vec![Rect::ZERO; child_count],
         }
     }
 
@@ -417,6 +567,7 @@ impl<T> MenuItem<T> {
             data: None,
             is_highlight: false,
             children: vec![],
+            child_rect: vec![],
         }
     }
 
@@ -440,7 +591,7 @@ impl<T> MenuItem<T> {
     fn highlight_first_child(&mut self) -> Option<()> {
         if !self.children.is_empty() {
             if let Some(it) = self.children.get_mut(0) {
-                it.is_highlight = true;
+                it.borrow_mut().is_highlight = true;
             }
             Some(())
         } else {
@@ -463,14 +614,14 @@ impl<T> MenuItem<T> {
             if cur == prev {
                 return; // No prev to highlight
             }
-            if self.children[cur].name != MENU_LINE {
+            if self.children[cur].borrow().name != MENU_LINE {
                 break; // Found next to highlight
             }
         }
         let index_to_highlight = cur;
         // Highlight previous
-        self.children[current_index].clear_highlight();
-        self.children[index_to_highlight].is_highlight = true;
+        self.children[current_index].borrow_mut().clear_highlight();
+        self.children[index_to_highlight].borrow_mut().is_highlight = true;
     }
 
     /// highlight prev item in this node
@@ -488,20 +639,20 @@ impl<T> MenuItem<T> {
             if cur == prev {
                 return; // No next to highlight
             }
-            if self.children[cur].name != MENU_LINE {
+            if self.children[cur].borrow().name != MENU_LINE {
                 break; // Found next to highlight
             }
         }
         let index_to_highlight = cur;
         // Highlight next
-        self.children[current_index].clear_highlight();
-        self.children[index_to_highlight].is_highlight = true;
+        self.children[current_index].borrow_mut().clear_highlight();
+        self.children[index_to_highlight].borrow_mut().is_highlight = true;
     }
 
     /// return highlighted child index
     fn highlight_child_index(&self) -> Option<usize> {
         for (idx, child) in self.children.iter().enumerate() {
-            if child.is_highlight {
+            if child.borrow_mut().is_highlight {
                 return Some(idx);
             }
         }
@@ -510,67 +661,20 @@ impl<T> MenuItem<T> {
     }
 
     /// if any child highlighted, then return its reference
-    fn highlight_child(&self) -> Option<&Self> {
-        self.children.iter().filter(|i| i.is_highlight).nth(0)
-    }
-
-    /// if any child highlighted, then return its reference
-    fn highlight_child_mut(&mut self) -> Option<&mut Self> {
-        self.children.iter_mut().filter(|i| i.is_highlight).nth(0)
+    fn highlight_child(&self) -> Option<RefMenuItem<T>> {
+        self.children
+            .iter()
+            .filter(|i| i.borrow().is_highlight)
+            .nth(0)
+            .and_then(|rmi| Some(rmi.clone()))
     }
 
     /// clear is_highlight flag recursively.
     fn clear_highlight(&mut self) {
         self.is_highlight = false;
         for child in self.children.iter_mut() {
-            child.clear_highlight();
+            child.borrow_mut().clear_highlight();
         }
-    }
-
-    /// return deepest highlight item's reference
-    pub fn highlight(&self) -> Option<&Self> {
-        if !self.is_highlight {
-            return None;
-        }
-
-        let mut highlight_item = self;
-        while highlight_item.highlight_child().is_some() {
-            highlight_item = highlight_item.highlight_child().unwrap();
-        }
-
-        Some(highlight_item)
-    }
-
-    /// mut version of highlight
-    fn highlight_mut(&mut self) -> Option<&mut Self> {
-        if !self.is_highlight {
-            return None;
-        }
-
-        let mut highlight_item = self;
-        while highlight_item.highlight_child_mut().is_some() {
-            highlight_item = highlight_item.highlight_child_mut().unwrap();
-        }
-
-        Some(highlight_item)
-    }
-
-    /// last but one layer in highlight
-    fn highlight_last_but_one(&mut self) -> Option<&mut Self> {
-        // if self is not highlighted or there is no highlighted child, return None
-        if !self.is_highlight || self.highlight_child_mut().is_none() {
-            return None;
-        }
-
-        let mut last_but_one = self;
-        while last_but_one
-            .highlight_child_mut()
-            .and_then(|x| x.highlight_child_mut())
-            .is_some()
-        {
-            last_but_one = last_but_one.highlight_child_mut().unwrap();
-        }
-        Some(last_but_one)
     }
 }
 
@@ -605,7 +709,7 @@ impl<T> Menu<T> {
     }
 
     /// update with highlight style
-    pub fn highlight(mut self, style: Style) -> Self {
+    pub fn highlight_style(mut self, style: Style) -> Self {
         self.highlight_item_style = style;
         self
     }
@@ -623,7 +727,7 @@ impl<T> Menu<T> {
     }
 
     /// render an item group in drop down
-    /* Each menu item is rendered like this
+    /* Each menu item in the group is rendered like this
     .|.NameString.|.
       ^^^^^^^^^^^^ ------ this area will be highlighted
     */
@@ -631,18 +735,20 @@ impl<T> Menu<T> {
         &self,
         x: u16,
         y: u16,
-        group: &[MenuItem<T>],
+        group: &mut MenuItem<T>,
         buf: &mut ratatui::buffer::Buffer,
         dropdown_count_to_go: u16, // including current, it is not drawn yet
     ) {
         // Compute width of all menu items
         let child_max_width = group
+            .children
             .iter()
+            .map(|ref_menu_item| ref_menu_item.borrow())
             .map(|menu_item| Span::from(menu_item.name.clone()).width())
             .max()
             .unwrap_or(0) as u16;
         let min_drop_down_width: u16 = (child_max_width + 6) as u16;
-        let min_drop_down_height: u16 = (group.len() + 2) as u16;
+        let min_drop_down_height: u16 = (group.children.len() + 2) as u16;
 
         // prevent calculation issue if canvas is narrow
         let drop_down_width = self.drop_down_width.min(buf.area.width);
@@ -683,7 +789,9 @@ impl<T> Menu<T> {
 
         // Render menu items
         let mut active_group: Option<_> = None;
-        for (idx, item) in group.iter().enumerate() {
+        let mut child_rect = vec![];
+        for (idx, child) in group.children.iter().enumerate() {
+            let item = child.borrow();
             let item_x = x + 2;
             let item_y = y + 1 + idx as u16;
             let is_active = item.is_highlight;
@@ -714,9 +822,16 @@ impl<T> Menu<T> {
                 item_name.push('>');
             }
 
+            let rect = Rect {
+                x: item_x,
+                y: item_y,
+                width: child_max_width + 2,
+                height: 1,
+            };
+
             buf.set_span(
-                item_x,
-                item_y,
+                rect.x,
+                rect.y,
                 &Span::styled(
                     item_name,
                     if is_active {
@@ -725,17 +840,26 @@ impl<T> Menu<T> {
                         self.default_item_style
                     },
                 ),
-                child_max_width + 2,
+                rect.width,
             );
 
+            child_rect.push(rect);
+
             if is_active && !item.children.is_empty() {
-                active_group = Some((item_x + child_max_width, item_y, item));
+                active_group = Some((item_x + child_max_width, item_y, child.clone()));
             }
         }
+        group.child_rect = child_rect;
 
         // draw at the end to ensure its content above all items in current level
-        if let Some((x, y, item)) = active_group {
-            self.render_dropdown(x, y, &item.children, buf, dropdown_count_to_go - 1);
+        if let Some((x, y, group)) = active_group {
+            self.render_dropdown(
+                x,
+                y,
+                &mut *group.borrow_mut(),
+                buf,
+                dropdown_count_to_go - 1,
+            );
         }
     }
 }
@@ -746,13 +870,14 @@ impl<T> Default for Menu<T> {
     }
 }
 
-impl<T: Clone> StatefulWidget for Menu<T> {
+impl<T: Clone> StatefulWidget for &Menu<T> {
     type State = MenuState<T>;
 
     fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer, state: &mut Self::State) {
         let area = area.clamp(*buf.area());
 
         let mut spans = vec![];
+        let mut rects = vec![];
         let mut x_pos = area.x;
         let y_pos = area.y;
 
@@ -761,24 +886,36 @@ impl<T: Clone> StatefulWidget for Menu<T> {
         // Skip top left char
         spans.push(Span::raw(" ").style(self.default_item_style));
 
-        for item in state.root_item.children.iter() {
+        for child in state.root_item.borrow().children.iter() {
+            let item = &mut *child.borrow_mut();
             let is_highlight = item.is_highlight;
+            let has_children = !item.children.is_empty();
+
+            // Render horizontal menu at top
             let item_style = if is_highlight {
                 self.highlight_item_style
             } else {
                 self.default_item_style
             };
-            let has_children = !item.children.is_empty();
-
-            let group_x_pos = x_pos;
             let span = Span::styled(format!(" {} ", item.name()), item_style);
-            x_pos += span.width() as u16;
+            let rect = Rect {
+                x: x_pos,
+                y: y_pos,
+                width: span.width() as u16,
+                height: 1,
+            };
             spans.push(span);
+            rects.push(rect);
 
+
+            x_pos += rect.width;
+
+            // Render vertical menu below top menu item
             if has_children && is_highlight {
-                self.render_dropdown(group_x_pos, y_pos + 1, &item.children, buf, dropdown_count);
+                self.render_dropdown(rect.x, rect.bottom(), item, buf, dropdown_count);
             }
         }
+        state.root_item.borrow_mut().child_rect = rects;
         buf.set_line(area.x, area.y, &Line::from(spans), area.width);
     }
 }

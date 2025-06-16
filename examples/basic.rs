@@ -1,7 +1,7 @@
 use color_eyre::config::HookBuilder;
 use ratatui::{
     crossterm::{
-        event::{self, Event, KeyCode},
+        event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
         execute,
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     },
@@ -42,12 +42,15 @@ pub fn init_hooks() -> color_eyre::Result<()> {
 fn init_terminal() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
     execute!(stdout(), EnterAlternateScreen)?;
+    execute!(stdout(), EnableMouseCapture)?;
     Terminal::new(CrosstermBackend::new(stdout()))
 }
 
 fn restore_terminal() -> io::Result<()> {
+    execute!(stdout(), DisableMouseCapture)?;
+    execute!(stdout(), LeaveAlternateScreen)?;
     disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen,)
+    Ok(())
 }
 
 struct App {
@@ -117,8 +120,10 @@ impl App {
             terminal.draw(|frame| frame.render_widget(&mut self, frame.size()))?;
 
             if event::poll(std::time::Duration::from_millis(10))? {
-                if let Event::Key(key) = event::read()? {
-                    self.on_key_event(key);
+                match event::read()? {
+                    Event::Key(key) => self.on_key_event(key),
+                    Event::Mouse(mouse) => self.on_mouse_event(mouse),
+                    _ => (),
                 }
             }
 
@@ -154,6 +159,10 @@ impl App {
             KeyCode::Enter => self.menu.select(),
             _ => {}
         }
+    }
+
+    fn on_mouse_event(&mut self, mouse: event::MouseEvent) {
+        self.menu.on_mouse_event(&mouse);
     }
 }
 

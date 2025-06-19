@@ -429,6 +429,7 @@ impl<T: Clone> MenuState<T> {
                 self.push();
             } else if let Some(ref data) = item.borrow().data {
                 self.events.push(MenuEvent::Selected(data.clone()));
+                // TODO self.reset();
             }
         }
     }
@@ -496,7 +497,19 @@ impl<T: Clone> MenuState<T> {
         }
         return (parent, child);
     }
-
+    /* TODO
+    /// Try to process an event. Return true if handled.
+    pub fn on_event(&mut self, event: Event) -> Option<MenuAction> {
+        match event {
+            Event::Key(key_event) => keybinds().match_event(key_event),
+            Event::MouseEvent(mouse_event) => {
+                if menu.on_mouse_event(mouse_event) {
+                    Some()
+                }
+            },
+        }
+    }
+    */
     /// Try to handle a mouse event. If handled, return true
     pub fn on_mouse_event(&mut self, event: &MouseEvent) -> bool {
         let point = Position {

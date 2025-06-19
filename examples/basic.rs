@@ -151,6 +151,7 @@ impl App {
 
     fn on_key_event(&mut self, key: event::KeyEvent) {
         match key.code {
+            KeyCode::Char('/') => self.menu.activate(),
             KeyCode::Char('h') | KeyCode::Left => self.menu.left(),
             KeyCode::Char('l') | KeyCode::Right => self.menu.right(),
             KeyCode::Char('j') | KeyCode::Down => self.menu.down(),
@@ -162,7 +163,12 @@ impl App {
     }
 
     fn on_mouse_event(&mut self, mouse: event::MouseEvent) {
-        self.menu.on_mouse_event(&mouse);
+        use tui_menu::MenuAction;
+        match self.menu.on_mouse_event(&mouse) {
+            Some(MenuAction::Select) => self.menu.select(),
+            Some(MenuAction::Reset) => self.menu.reset(),
+            _ => {}
+        }
     }
 }
 

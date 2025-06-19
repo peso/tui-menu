@@ -507,13 +507,12 @@ impl<T: Clone> MenuState<T> {
             MouseEventKind::Down(MouseButton::Left) => {
                 let root_item = self.root_item.clone();
                 if let Some((parent, child_inx)) = root_item.find_menu_item(point) {
-                    {
-                        // Scope to make sure parent borrow is released
-                        let mut parent = parent.borrow_mut();
-                        parent.clear_highlight();
-                        parent.is_highlight = true;
-                        parent.children[child_inx].borrow_mut().is_highlight = true;
-                    }
+                    // Select item under cursor
+                    let mut parent = parent.borrow_mut();
+                    parent.clear_highlight();
+                    parent.is_highlight = true;
+                    parent.children[child_inx].borrow_mut().is_highlight = true;
+                    drop(parent);
                     self.select();
                     return true;
                 } else if self.is_active() {

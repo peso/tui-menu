@@ -494,6 +494,11 @@ impl<T: Clone> MenuState<T> {
                         parent.children[child_inx].borrow_mut().is_highlight = true;
                     }
                     self.select();
+                    return true;
+                } else if self.is_active() {
+                    // Click outside active menu will close it
+                    self.reset();
+                    return true;
                 }
             }
             /* drag is kinda' complicated .. so not yet
@@ -503,7 +508,7 @@ impl<T: Clone> MenuState<T> {
             */
             _ => return false,
         }
-        return true;
+        return false;
     }
 }
 

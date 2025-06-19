@@ -31,6 +31,25 @@ use ratatui::{
 };
 use std::{borrow::Cow, cell::Ref, cell::RefCell, cell::RefMut, marker::PhantomData, rc::Rc};
 
+#[derive(Clone, Eq, PartialEq, Debug)]
+/// Events this widget consume. Commands to the menu
+/// Your application should map key events to these actions
+pub enum MenuAction {
+    // menu state
+    Activate,
+    Reset,
+
+    // navigate
+    Up,
+    Down,
+    Left,
+    Right,
+
+    // activate current menu item
+    Select,
+}
+
+
 /// Events this widget produce
 /// Now only emit Selected, may add few in future
 #[derive(Debug)]
@@ -148,6 +167,8 @@ impl<T: Clone> MenuState<T> {
         // the root item marked as always highlight
         // this makes highlight logic more consistent
         root_item.borrow_mut().is_highlight = true;
+        // BUG I think it is a bug
+        root_item.borrow_mut().is_highlight = false;
 
         Self {
             root_item,
@@ -510,6 +531,68 @@ impl<T: Clone> MenuState<T> {
         }
         return false;
     }
+
+    /// Handle a menu action, possibly updating the output queue
+    /// See drain_events()
+    pub fn handle_action(&mut self, action: MenuAction) {
+        match action {
+            // menu state
+            MenuAction::Activate => self.activate(),
+            MenuAction::Reset => self.reset(),
+
+            // navigate
+            MenuAction::Up => self.up(),
+            MenuAction::Down => self.down(),
+            MenuAction::Left => self.left(),
+            MenuAction::Right => self.right(),
+
+            // activate current menu item
+            MenuAction::Select => self.select(),
+        }
+    }
+}
+
+/// Map events to actions. This is primarily useful for mapping
+/// key-events, because mouse events contain a position that
+/// usually affect which action they represent.
+trait EventActionMap<Event, Action> {
+    fn new(initial_map: Vec<(Event, Action)>) -> Self;
+    fn add(&mut self, event: Event, action: Action);
+    fn chain(&mut self, link: Self);
+    fn map_event(&self, event: Event) -> Option<Action>;
+}
+type RefKeybind<Event, Action> = Rc<RefCell<Keybinds<Event, Action>>>;
+#[derive(Default)]
+pub struct Keybinds<Event, Action> {
+    map: Vec<(Event, Action)>,
+    extra: Vec<RefKeybind<Event, Action>>,
+}
+
+impl<Event, Action> EventActionMap<Event, Action> for RefKeybind<Event, Action>
+  where
+    Event: std::cmp::PartialEq + Copy,
+    Action: Copy
+  {
+    fn new(initial_map: Vec<(Event, Action)>) -> Self {
+        Rc::new(RefCell::new(Keybinds::<Event, Action> {
+            map: initial_map,
+            extra: vec![],
+        }))
+    }
+    fn add(&mut self, event: Event, action: Action) {
+        self.borrow_mut().map.push((event, action))
+    }
+    fn chain(&mut self, link: Self) {
+        self.borrow_mut().extra.push(link)
+    }
+    fn map_event(&self, event: Event) -> Option<Action> {
+        for (e, a) in self.borrow().map.iter() {
+            if *e == event { return Some(*a) }
+        }
+        self.borrow().extra.iter()
+            .find_map(|eam| eam.map_event(event))
+    }
+
 }
 
 /// A MenuItem with this name will be rendered as a separator line

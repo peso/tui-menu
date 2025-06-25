@@ -35,6 +35,7 @@ impl App {
                                 .collect(),
                         ),
                         MenuItem::item("Save as", Action::FileSaveAs),
+                        MenuItem::line(),
                         MenuItem::item("Exit", Action::Exit),
                     ],
                 ),

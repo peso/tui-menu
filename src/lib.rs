@@ -361,6 +361,9 @@ impl<T: Clone> MenuState<T> {
     }
 }
 
+/// A MenuItem with this name will be rendered as a separator line
+const MENU_LINE: &str = "";
+
 /// MenuItem is the node in menu tree. If children is not
 /// empty, then this item is the group item.
 pub struct MenuItem<T> {
@@ -396,11 +399,24 @@ impl<T> MenuItem<T> {
     ///
     /// ```
     pub fn group(name: impl Into<Cow<'static, str>>, children: Vec<Self>) -> Self {
+        if children.get(0).filter(|c| c.name == MENU_LINE).is_some() {
+            panic!("First menu item in a group must not be a line");
+        }
         Self {
             name: name.into(),
             data: None,
             is_highlight: false,
             children,
+        }
+    }
+
+    /// helper function to create a separator line
+    pub fn line() -> Self {
+        Self {
+            name: MENU_LINE.into(),
+            data: None,
+            is_highlight: false,
+            children: vec![],
         }
     }
 
@@ -439,13 +455,20 @@ impl<T> MenuItem<T> {
             self.highlight_first_child();
             return;
         };
-
-        let index_to_highlight = if current_index > 0 {
-            current_index - 1
-        } else {
-            0
-        };
-
+        // Find index to highlight
+        let mut cur = current_index;
+        loop {
+            let prev = cur;
+            cur = cur.saturating_sub(1);
+            if cur == prev {
+                return; // No prev to highlight
+            }
+            if self.children[cur].name != MENU_LINE {
+                break; // Found next to highlight
+            }
+        }
+        let index_to_highlight = cur;
+        // Highlight previous
         self.children[current_index].clear_highlight();
         self.children[index_to_highlight].is_highlight = true;
     }
@@ -457,8 +480,20 @@ impl<T> MenuItem<T> {
             self.highlight_first_child();
             return;
         };
-
-        let index_to_highlight = (current_index + 1).min(self.children.len() - 1);
+        // Find index to highlight
+        let mut cur = current_index;
+        loop {
+            let prev = cur;
+            cur = (cur + 1).min(self.children.len() - 1);
+            if cur == prev {
+                return; // No next to highlight
+            }
+            if self.children[cur].name != MENU_LINE {
+                break; // Found next to highlight
+            }
+        }
+        let index_to_highlight = cur;
+        // Highlight next
         self.children[current_index].clear_highlight();
         self.children[index_to_highlight].is_highlight = true;
     }
@@ -654,6 +689,21 @@ impl<T> Menu<T> {
             let is_active = item.is_highlight;
 
             let item_name = item.name();
+
+            if item_name == MENU_LINE {
+                let line = Block::default()
+                    .borders(Borders::TOP)
+                    .style(self.default_item_style);
+                let rect = Rect {
+                    x: item_x,
+                    y: item_y,
+                    width: area.width - 4,
+                    height: 1,
+                };
+                line.render(rect, buf);
+                child_rect.push(rect);
+                continue; // TODO rearrange code to avoid this jump
+            }
 
             // make style apply to whole line by make name whole line
             let mut item_name =

@@ -25,7 +25,7 @@ use ratatui::{
     crossterm::event::{MouseButton, MouseEvent, MouseEventKind},
     layout::Rect,
     prelude::Position,
-    style::{Color, Style},
+    style::{Color, Style, Styled},
     text::{Line, Span},
     widgets::{Clear, StatefulWidget, Widget},
 };
@@ -427,6 +427,8 @@ impl<T: Clone> MenuState<T> {
         if let Some(item) = self.find_highlight() {
             if !item.borrow().children.is_empty() {
                 self.push();
+            } else if !item.borrow().enabled {
+                return; // Ignore disabled items
             } else if let Some(ref data) = item.borrow().data {
                 self.events.push(MenuEvent::Selected(data.clone()));
                 // TODO self.reset();
@@ -615,6 +617,8 @@ const MENU_LINE: &str = "";
 pub struct MenuItem<T> {
     name: Cow<'static, str>,
     pub data: Option<T>,
+    /// Only enabled menu items can be selected
+    pub enabled: bool,
     children: Vec<RefMenuItem<T>>,
     child_rect: Vec<Rect>,
     is_highlight: bool,
@@ -626,6 +630,7 @@ impl<T> MenuItem<T> {
         Self {
             name: name.into(),
             data: Some(data),
+            enabled: true,
             is_highlight: false,
             children: vec![],
             child_rect: vec![],
@@ -654,6 +659,7 @@ impl<T> MenuItem<T> {
         Self {
             name: name.into(),
             data: None,
+            enabled: true,
             is_highlight: false,
             children: children.into_iter().map(|c| RefMenuItem::new(c)).collect(),
             child_rect: vec![Rect::ZERO; child_count],
@@ -665,6 +671,7 @@ impl<T> MenuItem<T> {
         Self {
             name: MENU_LINE.into(),
             data: None,
+            enabled: true, // will use normal style
             is_highlight: false,
             children: vec![],
             child_rect: vec![],
@@ -778,12 +785,16 @@ impl<T> MenuItem<T> {
     }
 }
 
-/// Widget focus on display/render
+/// StatefulWidget for displaying a menu.
+///
+/// The menu structure is stored in the state: [MenuState].
 pub struct Menu<T> {
     /// style for default item style
     pub default_item_style: Style,
     /// style for highlighted item
     pub highlight_item_style: Style,
+    /// style for disabled item
+    pub disabled_item_style: Style,
     /// width for drop down panel
     drop_down_width: u16,
     /// style for drop down panel
@@ -794,10 +805,11 @@ pub struct Menu<T> {
 impl<T> Menu<T> {
     pub fn new() -> Self {
         Self {
-            highlight_item_style: Style::default().fg(Color::White).bg(Color::LightBlue),
+            highlight_item_style: Style::default().bg(Color::LightBlue),
             default_item_style: Style::default().fg(Color::White),
+            disabled_item_style: Style::default().fg(Color::DarkGray),
             drop_down_width: 20,
-            drop_down_style: Style::default().bg(Color::DarkGray),
+            drop_down_style: Style::default().bg(Color::Gray),
             _priv: Default::default(),
         }
     }
@@ -810,6 +822,11 @@ impl<T> Menu<T> {
 
     /// update with highlight style
     pub fn highlight_style(mut self, style: Style) -> Self {
+        self.highlight_item_style = style;
+        self
+    }
+    /// update disabled style
+    pub fn disabled_style(mut self, style: Style) -> Self {
         self.highlight_item_style = style;
         self
     }
@@ -929,16 +946,20 @@ impl<T> Menu<T> {
                 height: 1,
             };
 
+            let mut item_style = if item.enabled {
+                self.default_item_style
+            } else {
+                self.disabled_item_style
+            };
+            if is_active {
+                item_style = item_style.set_style(self.highlight_item_style);
+            }
             buf.set_span(
                 rect.x,
                 rect.y,
                 &Span::styled(
                     item_name,
-                    if is_active {
-                        self.highlight_item_style
-                    } else {
-                        self.default_item_style
-                    },
+                    item_style,
                 ),
                 rect.width,
             );

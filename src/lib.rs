@@ -564,6 +564,87 @@ impl<T: Clone> MenuState<T> {
             MenuAction::Select => self.select(),
         }
     }
+
+    /// Iterate all menu items. This can be used to alter the
+    /// disabled state of all menu items.
+    pub fn iter(&mut self) -> IterMenuItemRef<T> {
+        IterMenuItemRef::new(self.root_item.clone())
+    }
+}
+
+/// Iterator to traverse the menu item tree items mutable in pre-order
+pub struct IterMenuItemRef<T> {
+    /// The root menu item
+    root_item: RefMenuItem<T>,
+    /// The child selected at each level
+    path: Vec<usize>,
+}
+
+impl<T> IterMenuItemRef<T> {
+    pub fn new(root: RefMenuItem<T>) -> Self {
+        Self {
+            root_item: root,
+            path: vec![0],
+        }
+    }
+    /**
+    Arguments:
+      path: The currently selected children at each depth
+      depth: Index into path
+      parent_ref: The parent for the current depth
+    */
+    fn next_at(
+        path: &mut Vec<usize>,
+        depth: usize,
+        parent_ref: RefMenuItem<T>)
+        -> Option<RefMenuItem<T>>
+    {
+        let next_depth = depth + 1;
+        let parent = parent_ref.borrow();
+
+        // If we are at the end of the path, see if parent has
+        // a child we can expand
+        if next_depth > path.len() {
+            if parent.children.len() > 0 {
+                // Expand into first child
+                let child_inx = 0;
+                path.push(child_inx);
+                return Some(parent.children[child_inx].clone())
+            }
+            // No children
+            return None;
+        }
+
+        // At this point next_depth <= path.len()
+        // so depth < path.len()
+        // and we are on our way to the end of the path
+
+        // Check if current child can find next item
+        let cur_child = path[depth];
+        let child_ref = &parent.children[cur_child];
+        if let Some(item) = Self::next_at(path, next_depth, child_ref.clone()) {
+            return Some(item);
+        }
+
+        // Current child is exhausted, try next child
+        let child_inx = cur_child + 1;
+        if child_inx < parent.children.len() {
+            path[depth] = child_inx;
+            return Some(parent.children[child_inx].clone())
+        }
+
+        // All children are exhausted, so back up
+        path.pop();
+        return None;
+    }
+}
+
+impl<T> Iterator for IterMenuItemRef<T> {
+    type Item = RefMenuItem<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Self::next_at(&mut self.path, 1, self.root_item.clone())
+    }
 }
 
 /// Map events to actions. This is primarily useful for mapping

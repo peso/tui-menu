@@ -781,13 +781,13 @@ impl<T> MenuItem<T> {
 /// Widget focus on display/render
 pub struct Menu<T> {
     /// style for default item style
-    default_item_style: Style,
+    pub default_item_style: Style,
     /// style for highlighted item
-    highlight_item_style: Style,
+    pub highlight_item_style: Style,
     /// width for drop down panel
     drop_down_width: u16,
     /// style for drop down panel
-    drop_down_style: Style,
+    pub drop_down_style: Style,
     _priv: PhantomData<T>,
 }
 

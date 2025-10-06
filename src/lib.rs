@@ -76,11 +76,11 @@ impl<T> RefMenuItem<T> {
         }
     }
 
-    pub fn borrow(&self) -> Ref<MenuItem<T>> {
+    pub fn borrow(&self) -> Ref<'_, MenuItem<T>> {
         self.0.borrow()
     }
 
-    pub fn borrow_mut(&self) -> RefMut<MenuItem<T>> {
+    pub fn borrow_mut(&self) -> RefMut<'_, MenuItem<T>> {
         self.0.borrow_mut()
     }
 

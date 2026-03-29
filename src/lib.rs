@@ -521,6 +521,28 @@ impl<T: Clone> MenuState<T> {
             MouseEventKind::Down(MouseButton::Left) => {
                 let root_item = self.root_item.clone();
                 if let Some((parent, child_inx)) = root_item.find_menu_item(point) {
+                    // Highlight item under cursor
+                    let mut parent = parent.borrow_mut();
+                    parent.clear_highlight();
+                    parent.is_highlight = true;
+                    parent.children[child_inx].borrow_mut().is_highlight = true;
+                } else {
+                    // Unhighlight this menu
+                }
+            }
+            MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+                let root_item = self.root_item.clone();
+                if let Some((parent, child_inx)) = root_item.find_menu_item(point) {
+                    // Highlight item under cursor
+                    let mut parent = parent.borrow_mut();
+                    parent.clear_highlight();
+                    parent.is_highlight = true;
+                    parent.children[child_inx].borrow_mut().is_highlight = true;
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let root_item = self.root_item.clone();
+                if let Some((parent, child_inx)) = root_item.find_menu_item(point) {
                     // Select item under cursor
                     let mut parent = parent.borrow_mut();
                     parent.clear_highlight();
@@ -535,11 +557,6 @@ impl<T: Clone> MenuState<T> {
                     return true;
                 }
             }
-            /* drag is kinda' complicated .. so not yet
-            MouseEventKind::Moved | MouseEventKind::Drag(_) => {
-                menu_item.find_highlight()
-            }
-            */
             _ => return false,
         }
         return false;
